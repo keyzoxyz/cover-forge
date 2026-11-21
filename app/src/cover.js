@@ -130,6 +130,7 @@ function layoutPanels(n, x, y, w, h, tpl) {
 // ---------- main ----------
 
 export function drawCover(ctx, opts) {
+  if (ctx && typeof ctx.getContext === 'function') ctx = ctx.getContext('2d');
   const o = opts || {};
   const width = o.width || 1080, height = o.height || 1350;
   const photos = Array.isArray(o.photos) ? o.photos.filter(Boolean).slice(0, 4) : [];
