@@ -1,18 +1,9 @@
 #!/usr/bin/env python3
-"""Capture the cover-art screenshots for the bounty writeup.
+"""Capture Cover Forge screenshots with Playwright.
 
-Serves the repository root on http://127.0.0.1:8100 with http.server in a
-background thread, drives app/index.html in headless Chromium at 1280x1400,
-and writes four PNGs into screenshots/:
-
-    1-default.png  demo poster, Vice Dusk template
-    2-neon.png     after window.__cover.setTemplate('Neon Rain')
-    3-photos.png   after loading the sample photos, captions and a title
-    4-export.png   element.screenshot() crop of the poster canvas alone
-
-Every file is kept under 256 KiB; oversized shots are quantised to a palette
-of at most 256 colours (Pillow) before being re-checked. The byte size of each
-final file is printed at the end.
+Serves the repository root at http://127.0.0.1:8100, drives app/index.html
+through four states and writes PNGs into screenshots/.  Any shot over
+256 KiB is re-encoded as a palette PNG with at most 256 colours.
 
 Run from anywhere:  python3 tools/shoot.py
 """
@@ -21,225 +12,162 @@ from __future__ import annotations
 
 import functools
 import http.server
+import socket
 import threading
-import time
-import urllib.request
 from pathlib import Path
 
-from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
-from playwright.sync_api import ViewportSize, sync_playwright
+from PIL import Image
+from playwright.sync_api import sync_playwright
 
-ROOT = Path(__file__).resolve().parents[1]
-SHOTS = ROOT / "screenshots"
+ROOT = Path(__file__).resolve().parent.parent
+SCREENSHOTS = ROOT / "screenshots"
 HOST = "127.0.0.1"
 PORT = 8100
-VIEWPORT: ViewportSize = {"width": 1280, "height": 1400}
-SIZE_LIMIT = 256 * 1024  # 256 KiB
-
-
-# --------------------------------------------------------------------- server
+LIMIT = 256 * 1024
 
 
 class QuietHandler(http.server.SimpleHTTPRequestHandler):
-    """SimpleHTTPRequestHandler without per-request logging noise."""
+    """Static file handler that keeps the terminal clean."""
 
     def log_message(self, format, *args):  # noqa: A002 - stdlib signature
         pass
 
 
-def start_server() -> tuple[http.server.ThreadingHTTPServer, str]:
+def start_server() -> http.server.ThreadingHTTPServer:
     handler = functools.partial(QuietHandler, directory=str(ROOT))
-    try:
-        httpd = http.server.ThreadingHTTPServer((HOST, PORT), handler)
-    except OSError as exc:
-        raise SystemExit(f"cannot bind {HOST}:{PORT} - is another server running? ({exc})")
+    httpd = http.server.ThreadingHTTPServer((HOST, PORT), handler)
+    httpd.daemon_threads = True
 
-    thread = threading.Thread(target=httpd.serve_forever, name="coverart-http", daemon=True)
+    # Fail loudly instead of silently screenshotting whatever else is on 8100.
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.settimeout(0.5)
+        if probe.connect_ex((HOST, PORT)) != 0:
+            raise RuntimeError("could not bind %s:%s" % (HOST, PORT))
+    finally:
+        probe.close()
+
+    thread = threading.Thread(target=httpd.serve_forever, daemon=True)
     thread.start()
-
-    base = f"http://{HOST}:{PORT}"
-    url = f"{base}/app/index.html"
-    for _ in range(100):
-        try:
-            with urllib.request.urlopen(url, timeout=1) as response:
-                if response.status == 200:
-                    return httpd, base
-        except OSError:
-            time.sleep(0.05)
-
-    httpd.shutdown()
-    httpd.server_close()
-    raise SystemExit(f"server at {base} never became ready")
+    return httpd
 
 
-# ---------------------------------------------------------------- page helpers
-
-
-def settle(page, extra_ms: int = 80) -> None:
-    """Wait for two animation frames plus a short beat so canvas paint lands."""
+def settle(page) -> None:
+    """Let pending rAF callbacks paint after a state change."""
     page.evaluate(
-        """(extra) => new Promise((resolve) => {
-            requestAnimationFrame(() => requestAnimationFrame(
-                () => setTimeout(resolve, extra)));
-        })""",
-        extra_ms,
+        "() => new Promise((resolve) => "
+        "requestAnimationFrame(() => requestAnimationFrame(() => resolve(true))))"
     )
 
 
-def wait_for_demo(page) -> None:
-    """Wait until the canvas exists, fonts are ready and the demo art is drawn."""
-    page.wait_for_selector("#poster", state="attached", timeout=30_000)
-    page.wait_for_function(
-        # FontFaceSet.status is only ever 'loading' or 'loaded' — 'complete' is
-        # the document.readyState value, not a font status.
-        "() => !!window.__cover && document.fonts && document.fonts.status === 'loaded'",
-        timeout=30_000,
-    )
-    try:
-        page.wait_for_function(
-            "() => /Demo poster ready/.test(document.querySelector('#status')?.textContent || '')",
-            timeout=20_000,
-        )
-    except PlaywrightTimeoutError:
-        # The engine still paints from primitives if sample building failed;
-        # fall back to checking that the canvas has opaque pixels.
-        page.wait_for_function(
-            """() => {
-                const c = document.querySelector('#poster');
-                if (!c || c.width < 512) return false;
-                const px = c.getContext('2d').getImageData(0, 0, 1, 1).data;
-                return px[3] > 0;
-            }""",
-            timeout=20_000,
-        )
-    settle(page)
-
-
-# --------------------------------------------------------------- png shrinking
-
-
-def shrink_png(path: Path) -> None:
-    """Quantise (and, as a last resort, downscale) until the PNG is under 256 KiB."""
-    if path.stat().st_size <= SIZE_LIMIT:
+def shrink_to_limit(path: Path, limit: int = LIMIT) -> None:
+    """Re-encode as a ≤256-colour PNG until the file fits under ``limit``."""
+    if path.stat().st_size <= limit:
         return
 
-    from PIL import Image
-
-    with Image.open(path) as source:
-        image = source.convert("RGB")
-
-    for colors in (256, 192, 128, 96, 64, 32):
-        candidate = path.with_name(f"{path.stem}.q{colors}.tmp.png")
-        quantised = image.quantize(
-            colors=colors,
-            method=Image.Quantize.MEDIANCUT,
-            dither=Image.Dither.FLOYDSTEINBERG,
-        )
-        quantised.save(candidate, format="PNG", optimize=True)
-        if candidate.stat().st_size <= SIZE_LIMIT:
-            candidate.replace(path)
+    image = Image.open(path).convert("RGB")
+    for colors in (256, 192, 128, 96, 64, 48, 32):
+        candidate = image.quantize(colors=colors, method=Image.Quantize.MEDIANCUT,
+                                   dither=Image.Dither.NONE)
+        candidate.save(path, format="PNG", optimize=True)
+        if path.stat().st_size <= limit:
             return
-        candidate.unlink()
 
-    # Extremely noisy shots may still overflow at 32 colours; scale down gently.
-    scaled = image
-    while scaled.width > 320:
-        scaled = scaled.resize(
-            (max(1, int(scaled.width * 0.8)), max(1, int(scaled.height * 0.8))),
+    # Extreme fallback: same palette, reduced pixel dimensions.
+    scale = 0.9
+    while path.stat().st_size > limit and scale > 0.25:
+        resized = image.resize(
+            (max(1, int(image.width * scale)), max(1, int(image.height * scale))),
             Image.Resampling.LANCZOS,
         )
-        candidate = path.with_name(f"{path.stem}.scaled.tmp.png")
-        scaled.quantize(
-            colors=256,
-            method=Image.Quantize.MEDIANCUT,
-            dither=Image.Dither.FLOYDSTEINBERG,
-        ).save(candidate, format="PNG", optimize=True)
-        if candidate.stat().st_size <= SIZE_LIMIT:
-            candidate.replace(path)
-            return
-        candidate.unlink()
+        resized.quantize(colors=32, method=Image.Quantize.MEDIANCUT,
+                         dither=Image.Dither.NONE).save(path, format="PNG", optimize=True)
+        scale -= 0.1
 
-    raise RuntimeError(f"could not shrink {path.name} below {SIZE_LIMIT} bytes")
+    if path.stat().st_size > limit:
+        raise RuntimeError("%s is still over %d bytes" % (path.name, limit))
 
 
-def capture(page, name: str, element: str | None = None) -> Path:
-    path = SHOTS / name
-    if element:
-        page.locator(element).screenshot(path=str(path))
+def report(path: Path) -> None:
+    size = path.stat().st_size
+    print("%-14s %8d bytes  (%6.1f KiB)" % (path.name, size, size / 1024))
+
+
+def capture(page, filename: str) -> Path:
+    target = SCREENSHOTS / filename
+    if filename == "4-export.png":
+        canvas = page.locator("#poster")
+        # Capture the poster at its native 1200x1500 resolution rather than
+        # the CSS-scaled preview size.
+        canvas.evaluate(
+            "(el) => { el.style.width = el.width + 'px'; el.style.height = el.height + 'px'; }"
+        )
+        settle(page)
+        canvas.screenshot(path=str(target), type="png")
     else:
-        page.screenshot(path=str(path))
-    shrink_png(path)
-    return path
+        page.screenshot(path=str(target), type="png", full_page=False, animations="disabled")
+    shrink_to_limit(target)
+    return target
 
 
-# ----------------------------------------------------------------------- main
+def main() -> None:
+    SCREENSHOTS.mkdir(parents=True, exist_ok=True)
+    httpd = start_server()
 
-
-def main() -> int:
-    SHOTS.mkdir(parents=True, exist_ok=True)
-    httpd, base = start_server()
-    written: list[Path] = []
-
+    results: list[Path] = []
     try:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch(headless=True)
-            context = browser.new_context(viewport=VIEWPORT, device_scale_factor=1)
-            page = context.new_page()
+            page = browser.new_page(
+                viewport={"width": 1280, "height": 1400}, device_scale_factor=1
+            )
 
+            page.goto("http://%s:%d/app/index.html" % (HOST, PORT), wait_until="load")
+            page.wait_for_function("() => !!window.__cover", timeout=15_000)
+            # The demo scenes are built asynchronously; wait for them, but do
+            # not fail if the fallback placeholder poster is all we get.
             try:
-                page.goto(f"{base}/app/index.html", wait_until="load", timeout=30_000)
-                wait_for_demo(page)
+                page.wait_for_function("() => window.__cover.photos.length > 0", timeout=10_000)
+            except Exception:
+                pass
+            page.evaluate("() => document.fonts.ready.then(() => true)")
+            settle(page)
 
-                # 1 - the demo poster, default Vice Dusk template.
-                written.append(capture(page, "1-default.png"))
+            # 1 — demo poster, default Vice Dusk template.
+            results.append(capture(page, "1-default.png"))
 
-                # 2 - Neon Rain. The driver API matches by id first; the label
-                # "Neon Rain" resolves through the select if the engine only
-                # knows "neon-rain", so fall back explicitly and verify.
-                active = page.evaluate("() => window.__cover.setTemplate('Neon Rain')")
-                if active != "neon-rain":
-                    active = page.evaluate("() => window.__cover.setTemplate('neon-rain')")
-                settle(page)
-                print(f"template after setTemplate('Neon Rain'): {active}")
-                written.append(capture(page, "2-neon.png"))
+            # 2 — Neon Rain template.
+            page.evaluate("() => window.__cover.setTemplate('Neon Rain')")
+            settle(page)
+            results.append(capture(page, "2-neon.png"))
 
-                # 3 - the real sample photos loaded through the file input,
-                # then a caption set and a poster title.
-                page.set_input_files(
-                    "#photo-input",
-                    [str(ROOT / "app/samples/boulevard.jpg"), str(ROOT / "app/samples/pier.jpg")],
-                )
-                page.wait_for_function(
-                    "() => /Loaded \\d+ photos?/.test(document.querySelector('#status')?.textContent || '')",
-                    timeout=20_000,
-                )
-                for index, caption in enumerate(
-                    ("Ocean Drive, 2 a.m.", "The pier after closing"), start=1
-                ):
-                    field = page.locator(f"#caption-{index}")
-                    if field.is_visible():
-                        field.fill(caption)
-                page.fill("#poster-title", "Boulevard Nights")
-                settle(page)
-                written.append(capture(page, "3-photos.png"))
+            # 3 — custom title and captions.
+            page.evaluate(
+                """() => {
+                    window.__cover.setTitle('Midnight Run');
+                    const captions = ['After hours', 'Neon skyline', 'No brakes', 'Last exit'];
+                    captions.forEach((text, i) => {
+                        const input = document.getElementById('caption-' + i);
+                        if (!input) return;
+                        input.value = text;
+                        input.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                }"""
+            )
+            settle(page)
+            results.append(capture(page, "3-photos.png"))
 
-                # 4 - tight crop of the poster canvas itself.
-                written.append(capture(page, "4-export.png", element="#poster"))
-            finally:
-                context.close()
-                browser.close()
+            # 4 — poster canvas only.
+            results.append(capture(page, "4-export.png"))
+
+            browser.close()
     finally:
         httpd.shutdown()
         httpd.server_close()
 
-    print("\nwrote screenshots:")
-    for path in written:
-        size = path.stat().st_size
-        flag = "OK" if size <= SIZE_LIMIT else "TOO BIG"
-        print(f"  {path.name}: {size:,} bytes ({size / 1024:.1f} KiB) [{flag}]")
-
-    return 0 if all(p.stat().st_size <= SIZE_LIMIT for p in written) else 1
+    for path in results:
+        report(path)
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    main()

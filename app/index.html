@@ -1,93 +1,98 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Vice Cover Studio — GTA 6 Style Cover Art Maker</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cover Forge — Poster Cover Art Maker</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <header class="masthead">
-    <h1>Vice Cover Studio</h1>
-    <p class="pitch">Turn your snapshots into sun-soaked, neon-drenched cover art in seconds.</p>
+    <h1 class="masthead__name">Cover Forge</h1>
+    <p class="masthead__pitch">Forge sun-soaked, neon-drenched cover art from your own photos in seconds.</p>
   </header>
 
   <main class="workspace">
-    <section class="controls" aria-label="Cover art controls">
-      <div class="control-group">
-        <h2>1. Photos</h2>
-        <div id="drop-zone" class="drop-zone" tabindex="0">
-          <p class="drop-zone__hint">Drop 2&ndash;4 photos here, or click to browse</p>
-          <p class="drop-zone__meta">JPG, PNG or WebP &middot; 2 to 4 images</p>
+    <section class="controls" aria-label="Cover controls">
+      <div class="panel">
+        <h2 class="panel__title">Photos</h2>
+        <label class="dropzone" for="photos">
+          <span class="dropzone__icon" aria-hidden="true">+</span>
+          <span class="dropzone__label">Drop 2–4 photos here</span>
+          <span class="dropzone__hint">or click to browse</span>
           <input
-            id="photo-input"
+            class="dropzone__input"
             type="file"
+            id="photos"
+            name="photos"
             accept="image/*"
             multiple
-            aria-label="Choose 2 to 4 photos">
+          >
+        </label>
+        <p class="field-note">Two to four images. The first fills the frame.</p>
+      </div>
+
+      <div class="panel">
+        <h2 class="panel__title">Captions</h2>
+        <div class="field-grid">
+          <label class="field">
+            <span class="field__label">Caption 1</span>
+            <input type="text" id="caption-1" name="caption-1" maxlength="60" placeholder="Ride or die">
+          </label>
+          <label class="field">
+            <span class="field__label">Caption 2</span>
+            <input type="text" id="caption-2" name="caption-2" maxlength="60" placeholder="No rules tonight">
+          </label>
+          <label class="field">
+            <span class="field__label">Caption 3</span>
+            <input type="text" id="caption-3" name="caption-3" maxlength="60" placeholder="Sunset state of mind">
+          </label>
+          <label class="field">
+            <span class="field__label">Caption 4</span>
+            <input type="text" id="caption-4" name="caption-4" maxlength="60" placeholder="Outrun the law">
+          </label>
         </div>
       </div>
 
-      <div id="captions" class="control-group captions" hidden>
-        <h2>2. Captions</h2>
-        <label class="field" for="caption-1">
-          <span>Photo 1</span>
-          <input id="caption-1" type="text" maxlength="60" placeholder="Caption for photo 1" autocomplete="off">
+      <div class="panel">
+        <h2 class="panel__title">Poster</h2>
+        <label class="field">
+          <span class="field__label">Title</span>
+          <input type="text" id="title" name="title" maxlength="40" placeholder="Vice City Nights" autocomplete="off">
         </label>
-        <label class="field" for="caption-2">
-          <span>Photo 2</span>
-          <input id="caption-2" type="text" maxlength="60" placeholder="Caption for photo 2" autocomplete="off">
-        </label>
-        <label class="field" for="caption-3">
-          <span>Photo 3</span>
-          <input id="caption-3" type="text" maxlength="60" placeholder="Caption for photo 3" autocomplete="off">
-        </label>
-        <label class="field" for="caption-4">
-          <span>Photo 4</span>
-          <input id="caption-4" type="text" maxlength="60" placeholder="Caption for photo 4" autocomplete="off">
-        </label>
-      </div>
 
-      <div class="control-group">
-        <h2>3. Poster</h2>
-        <label class="field" for="poster-title">
-          <span>Title</span>
-          <input id="poster-title" type="text" maxlength="40" placeholder="Vice City Nights" autocomplete="off">
-        </label>
-        <label class="field" for="template-select">
-          <span>Template</span>
-          <select id="template-select">
+        <label class="field">
+          <span class="field__label">Template</span>
+          <select id="template" name="template">
             <option value="vice-dusk" selected>Vice Dusk</option>
             <option value="neon-rain">Neon Rain</option>
             <option value="sunset-heist">Sunset Heist</option>
           </select>
         </label>
-        <label class="field" for="palette-select">
-          <span>Palette</span>
-          <select id="palette-select">
-            <option value="dusk-magenta" selected>Dusk Magenta</option>
-            <option value="neon-cyan">Neon Cyan</option>
-            <option value="sunset-gold">Sunset Gold</option>
-            <option value="vice-noir">Vice Noir</option>
+
+        <label class="field">
+          <span class="field__label">Palette</span>
+          <select id="palette" name="palette">
+            <option value="miami" selected>Miami Heat</option>
+            <option value="midnight">Midnight Chrome</option>
+            <option value="citrus">Citrus Blaze</option>
+            <option value="vapor">Vapor Bloom</option>
           </select>
         </label>
+
+        <button type="button" id="export" class="button button--primary">Export PNG</button>
       </div>
 
-      <button id="export-btn" type="button" class="export-btn">Export PNG</button>
-
-      <p id="status" class="status" role="status" aria-live="polite">Add 2&ndash;4 photos to get started.</p>
+      <p id="status" class="status" role="status" aria-live="polite">Add 2–4 photos to begin.</p>
     </section>
 
     <section class="preview" aria-label="Poster preview">
-      <div class="poster-frame">
-        <canvas id="poster" width="1024" height="1024">
-          Your browser does not support the canvas element.
-        </canvas>
+      <div class="preview__frame">
+        <canvas id="poster" width="1024" height="1024">Your browser does not support the canvas element.</canvas>
       </div>
+      <img id="hidden-cover" alt="" hidden>
     </section>
   </main>
-
-  <img id="hidden-cover" alt="" hidden>
 
   <script type="module" src="./src/main.js"></script>
 </body>
