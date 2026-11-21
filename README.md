@@ -4,49 +4,45 @@
 
 # Cover Forge
 
-Cover Forge turns 2–4 of your own photos into a sun-drenched, neon-soaked GTA 6
-style cover: a multi-panel canvas poster with a masthead title, per-photo
-captions, slanted panel strips and a halftone finish. Pick a template and a
-palette, tweak the text, then export the poster as a PNG. Everything is vanilla
-Canvas 2D — no frameworks, no network calls, no external fonts.
+Cover Forge turns 2–4 of your own photos into GTA 6 style cover art: a
+sun-drenched, neon-soaked poster rendered on a single 1024×1024 canvas, with
+title and caption type, selectable templates and colour palettes, and a
+one-click PNG export.
+
+It is a fully static, dependency-free browser app. All rendering is done with
+the canvas 2D API in plain ES modules — no build step, no network calls, no
+external fonts or assets.
 
 ## Files
 
 | Path | What it is |
 | --- | --- |
-| `app/index.html` | The app shell: photo drop zone, captions, title, template and palette pickers, export button. |
-| `app/style.css` | Layout and styling for the controls and live preview. |
-| `app/src/cover.js` | Cover art engine — templates, palettes, panel layout, halftone and type, all on Canvas 2D. |
-| `app/src/main.js` | UI state, drag-and-drop photo loading, live redraw and PNG export. |
-| `app/src/shots.js` | Procedurally painted sample photos, so the demo poster renders with no image files. |
-| `app/samples/` | Two sample JPEGs (`boulevard.jpg`, `pier.jpg`). |
-| `app/fonts/` | Font licence notice (`OFL-Lato.txt`). |
-| `tools/shoot.py` | Playwright script: serves the repo, drives the app at 1280×1400 and writes four PNGs to `screenshots/`. |
-| `screenshots/` | Generated demo screenshots (output of `tools/shoot.py`). |
-| `vendor/makefun-app.ts` | Vendored make.fun library used to build the bounty dossier. |
-| `main.ts`, `serve.ts` | Empty placeholders. |
-| `LICENSE` | MIT licence text. |
-| `.gitignore` | Ignore rules. |
+| `app/index.html` | The app shell: controls, canvas preview, module entry point |
+| `app/style.css` | Page styling for the masthead, control panel and preview |
+| `app/src/main.js` | Browser entry: wires inputs, file drops, live re-render and PNG export |
+| `app/src/cover.js` | Poster engine — templates, palettes, layout and canvas drawing |
+| `app/src/shots.js` | Procedural demo scenes used as placeholder photos before you add your own |
+| `tools/shoot.py` | Headless screenshot harness that captures the app into `screenshots/` |
+| `vendor/makefun-app.ts` | make.fun app scaffolding (unused by the static app) |
+| `LICENSE` | MIT licence text |
 
 ## Run it
 
-First, regenerate the demo screenshots (needs Playwright's Chromium and Pillow):
+Capture fresh screenshots (optional — needs Playwright and Pillow):
 
-```sh
-python3 tools/shoot.py
-```
+    python3 tools/shoot.py
 
-Then serve the repository root and open the app in a browser:
+This serves the repository root on `127.0.0.1:8100`, drives `app/index.html`
+in headless Chromium at 1280×1400 and writes PNGs into `screenshots/`.
 
-```sh
-python3 -m http.server 8000
-```
+To use the app, serve the repository root and open `app/index.html` from that
+server (a `file://` URL will not work because the scripts are ES modules):
 
-Open <http://localhost:8000/app/index.html>. Serving the root (rather than
-opening the file directly) keeps the ES modules and the drop zone behaving the
-same way they do under the screenshot script. Drop in 2–4 photos, or use the
-built-in demo poster, and hit **Export PNG**.
+    python3 -m http.server 8000
+
+Then open <http://localhost:8000/app/index.html>, drop in 2–4 photos, set a
+title and captions, pick a template and palette, and hit **Export PNG**.
 
 ## Licence
 
-MIT © 2026 make.fun — see [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Capture deterministic screenshots of the Cover Forge app.
 
-Serves the repo root on 127.0.0.1:8100, drives app/index.html in headless
-Chromium at 1280x1400 via the window.__cover test hook, and writes four
-PNGs to screenshots/, each kept under 256 KiB (quantised to <=256 colours
-when needed).
+Serves the repository root on 127.0.0.1:8100 (http.server in a background
+thread), drives app/index.html in headless Chromium at 1280x1400 through the
+window.__cover hook, and writes four PNGs to screenshots/. Every file is kept
+under 256 KiB, quantising to at most 256 colours when a shot is too large.
 
 Usage:  python tools/shoot.py
 """
@@ -23,22 +23,20 @@ OUT = ROOT / "screenshots"
 HOST, PORT = "127.0.0.1", 8100
 BASE = f"http://{HOST}:{PORT}"
 LIMIT = 256 * 1024
-COLORS = 256
 
 
 class QuietHandler(SimpleHTTPRequestHandler):
-    """Static handler that keeps the test output clean."""
+    """Static file handler that keeps the console output clean."""
 
     def log_message(self, format, *args):  # noqa: A002 - stdlib signature
         pass
 
 
-def start_server() -> tuple[ThreadingHTTPServer, threading.Thread]:
+def start_server() -> ThreadingHTTPServer:
     handler = functools.partial(QuietHandler, directory=str(ROOT))
     server = ThreadingHTTPServer((HOST, PORT), handler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    return server
 
 
 def settle(page) -> None:
@@ -52,14 +50,29 @@ def settle(page) -> None:
     )
 
 
-def quantise(path: Path) -> None:
-    """Shrink an oversized PNG to a 256-colour palette, in place."""
+def quantise(path: Path) -> int:
+    """Shrink an oversized PNG in place; returns the new byte size."""
     from PIL import Image
 
     with Image.open(path) as img:
         rgb = img.convert("RGB")
-        reduced = rgb.quantize(colors=COLORS, method=Image.Quantize.MEDIANCUT, dither=Image.Dither.NONE)
-        reduced.save(path, format="PNG", optimize=True)
+        # 256 colours or fewer, no dithering: keeps PNG compression effective.
+        for colors in (256, 192, 128, 64):
+            reduced = rgb.quantize(colors=colors, method=Image.Quantize.MEDIANCUT,
+                                   dither=Image.Dither.NONE)
+            reduced.save(path, format="PNG", optimize=True)
+            if path.stat().st_size <= LIMIT:
+                break
+        else:
+            # Extremely busy frames can stay large; shrink until they fit.
+            scale = 0.85
+            while path.stat().st_size > LIMIT and rgb.width > 320:
+                w, h = max(1, int(rgb.width * scale)), max(1, int(rgb.height * scale))
+                rgb = rgb.resize((w, h), Image.Resampling.LANCZOS)
+                rgb.quantize(colors=256, method=Image.Quantize.MEDIANCUT,
+                             dither=Image.Dither.NONE).save(path, format="PNG", optimize=True)
+                scale *= 0.85
+    return path.stat().st_size
 
 
 def save(page, name: str, selector: str | None = None) -> None:
@@ -70,14 +83,11 @@ def save(page, name: str, selector: str | None = None) -> None:
         page.locator(selector).screenshot(path=str(path))
 
     size = path.stat().st_size
+    note = ""
     if size > LIMIT:
         before = size
-        quantise(path)
-        size = path.stat().st_size
+        size = quantise(path)
         note = f" (quantised from {before} bytes)"
-    else:
-        note = ""
-
     flag = "" if size <= LIMIT else "  !! still over 256 KiB"
     print(f"{name}: {size} bytes{note}{flag}")
 
@@ -85,19 +95,22 @@ def save(page, name: str, selector: str | None = None) -> None:
 def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
 
-    server, _thread = start_server()
+    server = start_server()
     try:
         with sync_playwright() as pw:
             browser = pw.chromium.launch()
             page = browser.new_page(viewport={"width": 1280, "height": 1400})
             page.goto(f"{BASE}/app/index.html", wait_until="load")
             page.wait_for_function("() => window.__cover && window.__cover.state")
+            try:
+                # The demo poster paints its sample photos asynchronously.
+                page.wait_for_function("() => window.__cover.state.photos.length > 0",
+                                       timeout=15000)
+            except Exception:
+                print("warning: demo photos did not finish loading; capturing anyway")
             settle(page)
 
-            # 1. Demo poster, default Vice Dusk template.
-            if page.evaluate("() => window.__cover.state.template") != "vice-dusk":
-                page.evaluate("() => window.__cover.setTemplate('vice-dusk')")
-            settle(page)
+            # 1. Demo poster on the default Vice Dusk template.
             save(page, "1-default.png")
 
             # 2. Neon Rain template.
@@ -109,11 +122,11 @@ def main() -> None:
             page.evaluate(
                 """() => {
                     const cover = window.__cover;
-                    cover.setTitle('NEON RAIN');
-                    cover.state.captions[0] = 'Downtown after dark';
-                    cover.state.captions[1] = 'Chrome and palm trees';
-                    cover.state.captions[2] = 'Midnight run';
-                    cover.state.captions[3] = 'No brakes';
+                    cover.setTitle('NEON NIGHTS');
+                    ['DOWNTOWN AFTER DARK', 'CHROME AND PALM TREES',
+                     'MIDNIGHT RUN', 'NO BRAKES'].forEach((text, i) => {
+                        if (cover.state.captions) cover.state.captions[i] = text;
+                    });
                     cover.redraw();
                 }"""
             )

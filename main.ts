@@ -1,29 +1,23 @@
-// The entrypoint of this make.fun entry: copies the app and its screenshots into the output
-// directory and writes the dossier beside them with the vendored buildDossier, then reports
-// the file and byte counts of everything it wrote.
+// Entry point of this make.fun entry: copies app/ and screenshots/ into the output directory and
+// writes dossier.json there with buildDossier, so the scorer sees exactly what it recomputes.
 //
-//   node main.ts                      # out = /output
-//   MAKEFUN_OUTPUT_DIR=out node main.ts
-//
-// Paths are resolved against this file's own directory, so the entry runs from any cwd.
+//   node main.ts            # MAKEFUN_OUTPUT_DIR unset => /output
+//   MAKEFUN_OUTPUT_DIR=./out node main.ts
 
-import { cpSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { DossierError, buildDossier, type DossierCaps } from './vendor/makefun-app.ts';
 
-/** This entry's directory: app/, screenshots/ and vendor/ sit beside this file. */
-const root = dirname(fileURLToPath(import.meta.url));
+import { buildDossier, DossierError } from './vendor/makefun-app.ts';
 
-/** Where the entry is written: MAKEFUN_OUTPUT_DIR, else /output. */
-const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+/** The directory holding this entry: app/, screenshots/ and vendor/ live beside it. */
+const ENTRY_DIR = dirname(fileURLToPath(import.meta.url));
 
-/**
- * The caps the scorer's gate.json holds (gta6-cover-art-01): only text_max_bytes shapes the
- * dossier's bytes, the rest only refuse what the gate refuses anyway. app_path_max_bytes is
- * the library's own default of 1000 bytes.
- */
-const CAPS: DossierCaps = {
+/** Where this entry's files go: MAKEFUN_OUTPUT_DIR when set, else /output. */
+const OUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+
+/** The caps the bounty's gate.json gives buildDossier. Only text_max_bytes shapes the bytes. */
+const CAPS = {
   text_max_bytes: 163840,
   screenshots: { max: 4, max_bytes: 262144 },
   app_max_files: 993,
@@ -31,65 +25,55 @@ const CAPS: DossierCaps = {
   app_path_max_bytes: 1000,
 };
 
-/** How many files a tree holds and how many bytes their contents come to. */
-interface Count {
+interface TreeCount {
   files: number;
   bytes: number;
 }
 
-/** Every file under `dir`, counted (directories cost no bytes). */
-function measure(dir: string): Count {
-  let files = 0;
-  let bytes = 0;
-  const stack: string[] = [''];
-  while (stack.length > 0) {
-    const rel = stack.pop()!;
-    for (const entry of readdirSync(rel === '' ? dir : join(dir, rel), { withFileTypes: true })) {
-      const path = rel === '' ? entry.name : `${rel}/${entry.name}`;
-      if (entry.isDirectory()) {
-        stack.push(path);
-      } else if (entry.isFile()) {
-        files++;
-        bytes += statSync(join(dir, path)).size;
-      }
-    }
+/** Every file under `dir`, recursively, with the bytes they hold. */
+function countTree(dir: string): TreeCount {
+  const count: TreeCount = { files: 0, bytes: 0 };
+  for (const entry of readdirSync(dir, { recursive: true, withFileTypes: true })) {
+    if (!entry.isFile()) continue;
+    count.files += 1;
+    count.bytes += statSync(join(entry.parentPath, entry.name)).size;
   }
-  return { files, bytes };
+  return count;
 }
 
-/** Copies `from` to `to`, replacing whatever `to` held, and returns the copy's count. */
-function copy(from: string, to: string): Count {
+/** Replace `<out>/<name>` with a copy of `<entry>/<name>`, refusing a missing source directory. */
+function copyIntoOut(name: string): TreeCount {
+  const from = resolve(ENTRY_DIR, name);
+  if (!existsSync(from) || !statSync(from).isDirectory()) {
+    throw new Error(`${name}/: no such directory beside main.ts (${from})`);
+  }
+  const to = join(OUT_DIR, name);
   rmSync(to, { recursive: true, force: true });
   cpSync(from, to, { recursive: true });
-  return measure(to);
+  return countTree(to);
 }
 
-const line = (label: string, count: Count): string =>
-  `${label}: ${count.files} file${count.files === 1 ? '' : 's'}, ${count.bytes} bytes`;
+const app = copyIntoOut('app');
+const screenshots = copyIntoOut('screenshots');
 
+mkdirSync(OUT_DIR, { recursive: true });
+let dossier: Uint8Array;
 try {
-  mkdirSync(out, { recursive: true });
-  const app = copy(join(root, 'app'), join(out, 'app'));
-  const screenshots = copy(join(root, 'screenshots'), join(out, 'screenshots'));
-
-  // The dossier is built from the copied tree, exactly as the scorer builds it from what we hand in.
-  const dossier = buildDossier(out, CAPS);
-  writeFileSync(join(out, 'dossier.json'), dossier);
-  const dossierCount: Count = { files: 1, bytes: dossier.length };
-
-  console.log(line('app/', app));
-  console.log(line('screenshots/', screenshots));
-  console.log(line('dossier.json', dossierCount));
-  console.log(line('total', {
-    files: app.files + screenshots.files + dossierCount.files,
-    bytes: app.bytes + screenshots.bytes + dossierCount.bytes,
-  }));
-  console.log(`wrote ${join(out, 'dossier.json')}`);
+  dossier = buildDossier(OUT_DIR, CAPS);
 } catch (err) {
   if (err instanceof DossierError) {
-    console.error(`main: ${err.message}${err.limit === null ? '' : ` (limit: ${err.limit})`}`);
-    process.exitCode = 1;
-  } else {
-    throw err;
+    console.error(`main: ${err.message}`);
+    process.exit(1);
   }
+  throw err;
 }
+const dossierPath = join(OUT_DIR, 'dossier.json');
+writeFileSync(dossierPath, dossier);
+
+const out = countTree(OUT_DIR);
+console.log(`entry:       ${ENTRY_DIR}`);
+console.log(`out:         ${OUT_DIR}`);
+console.log(`app:         ${app.files} files, ${app.bytes} bytes`);
+console.log(`screenshots: ${screenshots.files} files, ${screenshots.bytes} bytes`);
+console.log(`dossier:     ${dossierPath}, ${dossier.byteLength} bytes`);
+console.log(`out total:   ${out.files} files, ${out.bytes} bytes`);
