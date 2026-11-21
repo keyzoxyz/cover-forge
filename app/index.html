@@ -1,126 +1,94 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Cover Forge — GTA-style cover art maker</title>
-  <link rel="stylesheet" href="./style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vice Cover Studio — GTA 6 Style Cover Art Maker</title>
+  <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <div class="app" id="app">
-    <aside class="controls" id="controls">
-      <header class="brand">
-        <div class="brand-mark" aria-hidden="true">VI</div>
-        <div class="brand-text">
-          <h1>Cover Forge</h1>
-          <p>GTA-style cover art maker</p>
-        </div>
-      </header>
+  <header class="masthead">
+    <h1>Vice Cover Studio</h1>
+    <p class="pitch">Turn your snapshots into sun-soaked, neon-drenched cover art in seconds.</p>
+  </header>
 
-      <section class="field">
-        <div class="field-head"><h2>Panel photos</h2><span class="hint">4 slots</span></div>
-        <div class="slots" id="slots">
-          <label class="slot" title="Panel 1">
-            <input type="file" accept="image/*" data-photo="0" aria-label="Panel 1 photo" />
-            <img alt="" data-thumb="0" />
-            <span class="slot-num">01</span>
-            <span class="slot-cta">Add</span>
-          </label>
-          <label class="slot" title="Panel 2">
-            <input type="file" accept="image/*" data-photo="1" aria-label="Panel 2 photo" />
-            <img alt="" data-thumb="1" />
-            <span class="slot-num">02</span>
-            <span class="slot-cta">Add</span>
-          </label>
-          <label class="slot" title="Panel 3">
-            <input type="file" accept="image/*" data-photo="2" aria-label="Panel 3 photo" />
-            <img alt="" data-thumb="2" />
-            <span class="slot-num">03</span>
-            <span class="slot-cta">Add</span>
-          </label>
-          <label class="slot" title="Panel 4">
-            <input type="file" accept="image/*" data-photo="3" aria-label="Panel 4 photo" />
-            <img alt="" data-thumb="3" />
-            <span class="slot-num">04</span>
-            <span class="slot-cta">Add</span>
-          </label>
-        </div>
-        <div class="row">
-          <button type="button" class="ghost" id="samples">Use sample photos</button>
-          <button type="button" class="ghost" id="clear">Clear</button>
-        </div>
-      </section>
-
-      <section class="field">
-        <div class="field-head"><h2>Caption</h2><span class="hint" id="captionCount">0 / 64</span></div>
-        <input id="caption" class="text-input" type="text" maxlength="64" spellcheck="false"
-               placeholder="SUNSET HEIST" value="SUNSET HEIST" autocomplete="off" />
-        <div class="field-head sub"><h2>Release line</h2><span class="hint">auto</span></div>
-        <input id="subline" class="text-input small" type="text" maxlength="72" spellcheck="false"
-               placeholder="COMING 2026" value="" autocomplete="off" />
-      </section>
-
-      <section class="field">
-        <div class="field-head"><h2>Grade</h2><span class="hint">look</span></div>
-        <div class="seg" id="gradeSeg" role="radiogroup" aria-label="Colour grade">
-          <label class="seg-item"><input type="radio" name="grade" value="sunset" checked /><span>Sunset</span></label>
-          <label class="seg-item"><input type="radio" name="grade" value="neon" /><span>Neon Night</span></label>
-          <label class="seg-item"><input type="radio" name="grade" value="gold" /><span>Gold Heist</span></label>
-        </div>
-      </section>
-
-      <section class="field">
-        <div class="field-head"><h2>Layout</h2><span class="hint">panels</span></div>
-        <div class="seg" id="layoutSeg" role="radiogroup" aria-label="Panel layout">
-          <label class="seg-item"><input type="radio" name="layout" value="grid" checked /><span>Classic Grid</span></label>
-          <label class="seg-item"><input type="radio" name="layout" value="triptych" /><span>Triptych</span></label>
-          <label class="seg-item"><input type="radio" name="layout" value="tall" /><span>Tall Poster</span></label>
-        </div>
-      </section>
-
-      <section class="field">
-        <div class="field-head"><h2>Size</h2><span class="hint">px</span></div>
-        <div class="seg" id="sizeSeg" role="radiogroup" aria-label="Poster size">
-          <label class="seg-item"><input type="radio" name="size" value="1080x1080" checked /><span>1080²</span></label>
-          <label class="seg-item"><input type="radio" name="size" value="1080x1350" /><span>1080×1350</span></label>
-          <label class="seg-item"><input type="radio" name="size" value="1920x1080" /><span>1920×1080</span></label>
-        </div>
-      </section>
-
-      <div class="actions">
-        <button type="button" class="primary" id="export">Export PNG</button>
-        <span class="chip" id="dims">1080 × 1080</span>
-      </div>
-      <p class="status" id="status" role="status">Booting…</p>
-      <p class="credit">Lato by Łukasz Dziedzic · SIL OFL 1.1 · runs offline</p>
-    </aside>
-
-    <main class="stage" id="stage">
-      <div class="stage-bar">
-        <span class="dot" aria-hidden="true"></span>
-        <span id="stageLabel">PREVIEW · SUNSET · CLASSIC GRID</span>
-        <span class="stage-right" id="stageRight">1080 × 1080</span>
-      </div>
-      <div class="canvas-wrap" id="canvasWrap">
-        <canvas id="poster" width="1080" height="1080" aria-label="Cover art preview"></canvas>
-      </div>
-      <p class="stage-foot">Photos never leave your browser — everything is painted locally on the canvas.</p>
-    </main>
-
-    <div class="export-view" id="exportView" hidden>
-      <div class="export-card">
-        <div class="export-shot"><img id="exportImg" alt="Exported cover art" /></div>
-        <div class="export-meta">
-          <h2>Export complete</h2>
-          <p id="exportInfo">cover-forge.png</p>
-          <div class="row">
-            <a class="primary" id="download" download="cover-forge.png" href="#">Download PNG</a>
-            <button type="button" class="ghost" id="back">Back to editor</button>
-          </div>
+  <main class="workspace">
+    <section class="controls" aria-label="Cover art controls">
+      <div class="control-group">
+        <h2>1. Photos</h2>
+        <div id="drop-zone" class="drop-zone" tabindex="0">
+          <p class="drop-zone__hint">Drop 2&ndash;4 photos here, or click to browse</p>
+          <p class="drop-zone__meta">JPG, PNG or WebP &middot; 2 to 4 images</p>
+          <input
+            id="photo-input"
+            type="file"
+            accept="image/*"
+            multiple
+            aria-label="Choose 2 to 4 photos">
         </div>
       </div>
-    </div>
-  </div>
+
+      <div id="captions" class="control-group captions" hidden>
+        <h2>2. Captions</h2>
+        <label class="field" for="caption-1">
+          <span>Photo 1</span>
+          <input id="caption-1" type="text" maxlength="60" placeholder="Caption for photo 1" autocomplete="off">
+        </label>
+        <label class="field" for="caption-2">
+          <span>Photo 2</span>
+          <input id="caption-2" type="text" maxlength="60" placeholder="Caption for photo 2" autocomplete="off">
+        </label>
+        <label class="field" for="caption-3">
+          <span>Photo 3</span>
+          <input id="caption-3" type="text" maxlength="60" placeholder="Caption for photo 3" autocomplete="off">
+        </label>
+        <label class="field" for="caption-4">
+          <span>Photo 4</span>
+          <input id="caption-4" type="text" maxlength="60" placeholder="Caption for photo 4" autocomplete="off">
+        </label>
+      </div>
+
+      <div class="control-group">
+        <h2>3. Poster</h2>
+        <label class="field" for="poster-title">
+          <span>Title</span>
+          <input id="poster-title" type="text" maxlength="40" placeholder="Vice City Nights" autocomplete="off">
+        </label>
+        <label class="field" for="template-select">
+          <span>Template</span>
+          <select id="template-select">
+            <option value="vice-dusk" selected>Vice Dusk</option>
+            <option value="neon-rain">Neon Rain</option>
+            <option value="sunset-heist">Sunset Heist</option>
+          </select>
+        </label>
+        <label class="field" for="palette-select">
+          <span>Palette</span>
+          <select id="palette-select">
+            <option value="dusk-magenta" selected>Dusk Magenta</option>
+            <option value="neon-cyan">Neon Cyan</option>
+            <option value="sunset-gold">Sunset Gold</option>
+            <option value="vice-noir">Vice Noir</option>
+          </select>
+        </label>
+      </div>
+
+      <button id="export-btn" type="button" class="export-btn">Export PNG</button>
+
+      <p id="status" class="status" role="status" aria-live="polite">Add 2&ndash;4 photos to get started.</p>
+    </section>
+
+    <section class="preview" aria-label="Poster preview">
+      <div class="poster-frame">
+        <canvas id="poster" width="1024" height="1024">
+          Your browser does not support the canvas element.
+        </canvas>
+      </div>
+    </section>
+  </main>
+
+  <img id="hidden-cover" alt="" hidden>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

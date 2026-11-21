@@ -1,252 +1,312 @@
-// main.js — state, wiring, render loop, export.
-import { drawCover } from './cover.js';
-import { runShot } from './shots.js';
+/**
+ * main.js — browser entry for Vice Cover Studio.
+ *
+ * Wires the static markup in index.html to the pure canvas engine in cover.js.
+ * All mutable UI state lives in one `state` object, and every mutation funnels
+ * through draw(), so the poster can always be reproduced from state alone.
+ * No network access: photos are local object URLs, demo art is generated.
+ */
+import { drawCover, TEMPLATES, PALETTES } from './cover.js';
+import { buildSamples } from './shots.js';
 
-const SIZES = {
-  '1080x1080': [1080, 1080],
-  '1080x1350': [1080, 1350],
-  '1920x1080': [1920, 1080],
-};
+const MAX_PHOTOS = 4;
+const $ = (id) => document.getElementById(id);
 
-const SAMPLES = {
-  pier: './samples/pier.jpg',
-  boulevard: './samples/boulevard.jpg',
-};
+const canvas = $('poster');
+const ctx = canvas ? canvas.getContext('2d') : null;
+const hidden = $('hidden-cover');
+const fileInput = $('photo-input');
+const dropZone = $('drop-zone');
+const captionsBox = $('captions');
+const captionInputs = [1, 2, 3, 4].map((i) => $('caption-' + i));
+const captionFields = captionInputs.map((el) => (el ? el.closest('.field') : null));
+const titleInput = $('poster-title');
+const templateSelect = $('template-select');
+const paletteSelect = $('palette-select');
+const exportBtn = $('export-btn');
+const statusEl = $('status');
+
+const DEFAULT_TITLE = 'Vice City Nights';
 
 const state = {
-  photos: [null, null, null, null],
-  caption: 'SUNSET HEIST',
-  subline: '',
-  grade: 'sunset',
-  layout: 'grid',
-  size: '1080x1080',
-  dirty: true,
+  title: '',
+  template: TEMPLATES[0].id,
+  palette: PALETTES[0].id,
+  captions: ['', '', '', ''],
+  photos: [],
+  urls: [],
+  earnedCount: 0,
+  demo: true,
 };
 
-const $ = (sel) => document.querySelector(sel);
-const canvas = $('#poster');
-const stageLabel = $('#stageLabel');
-const dimsChip = $('#dims');
-const stageRight = $('#stageRight');
-const statusEl = $('#status');
-const captionInput = $('#caption');
-const sublineInput = $('#subline');
-const countEl = $('#captionCount');
-const slots = Array.from(document.querySelectorAll('.slot'));
-const blobs = [null, null, null, null];
+const paletteById = (id) => PALETTES.find((p) => p.id === id) || PALETTES[0];
+const templateById = (id) => TEMPLATES.find((t) => t.id === id) || TEMPLATES[0];
 
-function setStatus(msg, kind) {
-  statusEl.textContent = msg;
-  statusEl.classList.remove('ok', 'warn', 'err');
-  if (kind) statusEl.classList.add(kind);
+function setStatus(message) {
+  if (statusEl) statusEl.textContent = message;
 }
 
-function resizeCanvas() {
-  const [w, h] = SIZES[state.size] || SIZES['1080x1080'];
-  if (canvas.width !== w || canvas.height !== h) {
-    canvas.width = w;
-    canvas.height = h;
-  }
-  dimsChip.textContent = `${w} × ${h}`;
-  stageRight.textContent = `${w} × ${h}`;
+/* ------------------------------------------------------------------ render */
+
+let mirrorTimer = 0;
+
+/** Debounced copy of the canvas into the hidden <img>, for scrapers/previews. */
+function scheduleMirror() {
+  clearTimeout(mirrorTimer);
+  mirrorTimer = setTimeout(() => {
+    if (!hidden || !canvas || typeof canvas.toDataURL !== 'function') return;
+    try {
+      hidden.src = canvas.toDataURL('image/png');
+      hidden.alt = 'Cover art preview: ' + (state.title.trim() || DEFAULT_TITLE);
+    } catch (err) {
+      /* A tainted canvas is impossible here; never let preview mirroring break the app. */
+    }
+  }, 80);
 }
 
-function updateStageLabel() {
-  const layoutName = { grid: 'CLASSIC GRID', triptych: 'TRIPTYCH', tall: 'TALL POSTER' }[state.layout] || 'CLASSIC GRID';
-  const gradeName = { sunset: 'SUNSET', neon: 'NEON NIGHT', gold: 'GOLD HEIST' }[state.grade] || 'SUNSET';
-  stageLabel.textContent = `PREVIEW · ${gradeName} · ${layoutName}`;
+function draw() {
+  if (!ctx) return;
+  drawCover(ctx, {
+    width: canvas.width,
+    height: canvas.height,
+    title: state.title,
+    template: state.template,
+    palette: paletteById(state.palette),
+    photos: state.photos,
+  });
+  scheduleMirror();
 }
 
-function render() {
-  if (state.dirty) {
-    state.dirty = false;
-    resizeCanvas();
-    updateStageLabel();
-    drawCover(canvas, state);
-  }
-  requestAnimationFrame(render);
+/* ------------------------------------------------------------------ photos */
+
+function loadImage(url) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error('That image could not be decoded.'));
+    img.src = url;
+  });
 }
 
-function invalidate() {
-  state.dirty = true;
+function syncCaptions() {
+  const n = state.photos.length;
+  if (captionsBox) captionsBox.hidden = n === 0;
+  captionFields.forEach((field, i) => {
+    const input = captionInputs[i];
+    if (field) field.hidden = i >= n;
+    if (input) input.disabled = i >= n;
+  });
 }
 
-// ---- photos ----
-function clearPhoto(i) {
-  if (blobs[i]) {
-    URL.revokeObjectURL(blobs[i]);
-    blobs[i] = null;
-  }
-  state.photos[i] = null;
-  slots[i].classList.remove('has-photo');
-  slots[i].querySelector('img').removeAttribute('src');
-  slots[i].querySelector('input').value = '';
-  invalidate();
+function releaseUrls() {
+  state.urls.forEach((url) => URL.revokeObjectURL(url));
+  state.urls = [];
 }
 
-function setPhoto(i, src, isBlob) {
-  if (blobs[i]) {
-    URL.revokeObjectURL(blobs[i]);
-    blobs[i] = null;
-  }
-  if (!src) {
-    clearPhoto(i);
+async function loadPhotos(files) {
+  const picked = Array.from(files || [])
+    .filter((file) => file && /^image\//.test(file.type))
+    .slice(0, MAX_PHOTOS);
+
+  if (!picked.length) {
+    setStatus('Those files were not images — try JPG, PNG or WebP.');
     return;
   }
-  const img = new Image();
-  img.decoding = 'async';
-  img.onload = () => invalidate();
-  img.src = src;
-  state.photos[i] = img;
-  slots[i].classList.add('has-photo');
-  slots[i].querySelector('img').src = src;
-  if (isBlob) blobs[i] = src;
-  invalidate();
+
+  const urls = picked.map((file) => URL.createObjectURL(file));
+  try {
+    const images = await Promise.all(urls.map(loadImage));
+    releaseUrls();
+    state.urls = urls;
+    state.photos = images;
+    state.demo = false;
+    syncCaptions();
+    draw();
+    const n = images.length;
+    setStatus(
+      n < 2
+        ? `Loaded ${n} photo — add ${2 - n} more for the full layout.`
+        : `Loaded ${n} photos. Tweak the title or hit Export PNG.`
+    );
+  } catch (err) {
+    urls.forEach((url) => URL.revokeObjectURL(url));
+    setStatus(err && err.message ? err.message : 'That image could not be loaded.');
+  }
 }
 
-slots.forEach((slot, i) => {
-  slot.querySelector('input').addEventListener('change', (ev) => {
-    const file = ev.target.files && ev.target.files[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) {
-      setStatus('That file is not an image', 'warn');
+/* --------------------------------------------------------------- demo boot */
+
+async function startDemo() {
+  try {
+    const samples = await buildSamples(canvas, drawCover);
+    if (state.photos.length) return; // the user already dropped their own
+    state.photos = samples.slice(0, MAX_PHOTOS);
+    state.demo = true;
+    syncCaptions();
+    draw();
+    setStatus('Demo poster ready — drop 2–4 photos to make it yours.');
+  } catch (err) {
+    draw(); // the engine still paints a poster from primitives alone
+  }
+}
+
+/* ----------------------------------------------------------------- export */
+
+function slug(text) {
+  return String(text || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
+}
+
+function currentFilename() {
+  return (slug(state.title) || 'vice-cover') + '-cover.png';
+}
+
+function exportPng() {
+  if (!canvas || typeof canvas.toBlob !== 'function') {
+    setStatus('Export is not available in this browser.');
+    return;
+  }
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      setStatus('Export failed — the canvas could not be encoded.');
       return;
     }
-    setPhoto(i, URL.createObjectURL(file), true);
-    setStatus(`Panel ${i + 1}: ${file.name}`, 'ok');
-  });
-});
-
-$('#samples').addEventListener('click', () => {
-  setPhoto(0, SAMPLES.pier);
-  setPhoto(1, SAMPLES.boulevard);
-  setPhoto(2, SAMPLES.boulevard);
-  setPhoto(3, SAMPLES.pier);
-  setStatus('Sample photos loaded', 'ok');
-});
-
-$('#clear').addEventListener('click', () => {
-  for (let i = 0; i < 4; i += 1) clearPhoto(i);
-  setStatus('Panels cleared — add your own photos');
-});
-
-// ---- text + pickers ----
-captionInput.addEventListener('input', () => {
-  state.caption = captionInput.value;
-  countEl.textContent = `${captionInput.value.length} / 64`;
-  invalidate();
-});
-
-sublineInput.addEventListener('input', () => {
-  state.subline = sublineInput.value;
-  invalidate();
-});
-
-['grade', 'layout', 'size'].forEach((name) => {
-  document.querySelectorAll(`input[name="${name}"]`).forEach((radio) => {
-    radio.addEventListener('change', () => {
-      if (!radio.checked) return;
-      state[name] = radio.value;
-      invalidate();
-    });
-  });
-});
-
-// ---- export ----
-$('#export').addEventListener('click', async () => {
-  const btn = $('#export');
-  btn.disabled = true;
-  setStatus('Painting full-size export…', 'warn');
-  try {
-    const [w, h] = SIZES[state.size] || SIZES['1080x1080'];
-    const out = document.createElement('canvas');
-    out.width = w;
-    out.height = h;
-    drawCover(out, state);
-    const blob = await new Promise((resolve, reject) => {
-      out.toBlob((b) => (b ? resolve(b) : reject(new Error('toBlob returned null'))), 'image/png');
-    });
-    const url = URL.createObjectURL(blob);
-    $('#exportImg').src = url;
-    const link = $('#download');
-    link.href = url;
-    link.download = `cover-forge-${w}x${h}.png`;
-    $('#exportInfo').textContent = `cover-forge-${w}x${h}.png · ${(blob.size / 1024).toFixed(0)} KiB`;
-    $('#exportView').hidden = false;
-    setStatus(`Exported ${w}×${h} PNG`, 'ok');
-  } catch (err) {
-    setStatus(`Export failed: ${err.message}`, 'err');
-  } finally {
-    btn.disabled = false;
-  }
-});
-
-$('#back').addEventListener('click', () => {
-  $('#exportView').hidden = true;
-});
-
-// ---- fonts: real FontFace loads from app/fonts, relative URLs ----
-async function loadFonts() {
-  const faces = [
-    new FontFace('Lato', 'url(./fonts/Lato-Black.ttf)', { weight: '900', style: 'normal' }),
-    new FontFace('Lato', 'url(./fonts/Lato-Bold.ttf)', { weight: '700', style: 'normal' }),
-    new FontFace('Lato Black', 'url(./fonts/Lato-Black.ttf)', { weight: '400', style: 'normal' }),
-  ];
-  const loaded = await Promise.all(faces.map((f) => f.load()));
-  loaded.forEach((f) => document.fonts.add(f));
-  await document.fonts.ready;
-  return document.fonts.check('900 40px Lato');
+    const href = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = currentFilename();
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(href), 4000);
+    setStatus('Exported ' + currentFilename());
+  }, 'image/png');
 }
 
-// ---- shot harness boot ----
-function bootShot() {
-  const q = new URLSearchParams(window.location.search);
-  const shot = q.get('shot');
-  if (!shot) return;
+/* ------------------------------------------------------------------ wiring */
 
-  const caption = q.get('caption');
-  if (caption !== null && caption !== '') {
-    state.caption = caption;
-    captionInput.value = caption;
-    countEl.textContent = `${caption.length} / 64`;
-  }
-  const size = q.get('size');
-  if (size && SIZES[size]) {
-    state.size = size;
-    const radio = document.querySelector(`input[name="size"][value="${size}"]`);
-    if (radio) radio.checked = true;
-  }
-
-  const load = async () => {
-    const key = q.get('photo');
-    if (!key || !SAMPLES[key]) return;
-    const otherKey = key === 'pier' ? 'boulevard' : 'pier';
-    const order = [key, otherKey, otherKey, key];
-    await Promise.all(order.map((k, i) => new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        state.photos[i] = img;
-        slots[i].classList.add('has-photo');
-        slots[i].querySelector('img').src = SAMPLES[k];
-        resolve();
-      };
-      img.onerror = () => resolve();
-      img.src = SAMPLES[k];
-    })));
-    invalidate();
-  };
-
-  runShot(shot, q, load).catch((err) => setStatus(`Shot error: ${err.message}`, 'err'));
+if (fileInput) {
+  fileInput.addEventListener('change', () => {
+    const files = Array.from(fileInput.files || []);
+    fileInput.value = ''; // allow re-picking the same file
+    loadPhotos(files);
+  });
 }
 
-(async function boot() {
-  const ok = await loadFonts().catch((err) => {
-    setStatus(`Font load issue: ${err.message}`, 'warn');
-    return false;
+if (dropZone) {
+  dropZone.addEventListener('click', (event) => {
+    if (event.target === fileInput || !fileInput) return; // avoid click recursion
+    fileInput.click();
   });
-  if (ok !== false) setStatus('Lato loaded · ready', 'ok');
-  window.__latoReady = ok !== false;
-  bootShot();
-  invalidate();
-  requestAnimationFrame(render);
-})();
+  dropZone.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ' || event.key === 'Spacebar') {
+      event.preventDefault();
+      if (fileInput) fileInput.click();
+    }
+  });
+  ['dragenter', 'dragover'].forEach((type) => {
+    dropZone.addEventListener(type, (event) => {
+      event.preventDefault();
+      dropZone.classList.add('is-dragging');
+    });
+  });
+  ['dragleave', 'dragend'].forEach((type) => {
+    dropZone.addEventListener(type, () => dropZone.classList.remove('is-dragging'));
+  });
+  dropZone.addEventListener('drop', (event) => {
+    event.preventDefault();
+    dropZone.classList.remove('is-dragging');
+    if (event.dataTransfer && event.dataTransfer.files) loadPhotos(event.dataTransfer.files);
+  });
+}
+
+if (titleInput) {
+  titleInput.addEventListener('input', () => {
+    state.title = titleInput.value;
+    draw();
+  });
+}
+
+if (templateSelect) {
+  templateSelect.addEventListener('change', () => {
+    state.template = templateById(templateSelect.value).id;
+    draw();
+  });
+}
+
+if (paletteSelect) {
+  paletteSelect.addEventListener('change', () => {
+    state.palette = paletteById(paletteSelect.value).id;
+    draw();
+  });
+}
+
+captionInputs.forEach((input, index) => {
+  if (!input) return;
+  input.addEventListener('input', () => {
+    state.captions[index] = input.value;
+    draw(); // captions are part of state; the engine repaints from it
+  });
+});
+
+if (exportBtn) exportBtn.addEventListener('click', exportPng);
+
+/* ------------------------------------------------------- headless driver API */
+
+function setTemplate(id) {
+  const template = templateById(String(id));
+  state.template = template.id;
+  if (templateSelect) templateSelect.value = template.id;
+  draw();
+  return state.template;
+}
+
+function setPalette(id) {
+  const palette = paletteById(String(id));
+  state.palette = palette.id;
+  if (paletteSelect) paletteSelect.value = palette.id;
+  draw();
+  return state.palette;
+}
+
+function setTitle(text) {
+  state.title = String(text == null ? '' : text).slice(0, 40);
+  if (titleInput) titleInput.value = state.title;
+  draw();
+  return state.title;
+}
+
+function markEarnedCount(count) {
+  const next = Math.max(0, Math.floor(Number(count) || 0));
+  state.earnedCount = next;
+  document.body.dataset.earnedCount = String(next);
+  const badge = $('earned-count');
+  if (badge) badge.textContent = String(next);
+  return next;
+}
+
+window.__cover = { setTemplate, setPalette, setTitle, markEarnedCount };
+
+/* -------------------------------------------------------------------- boot */
+
+function init() {
+  if (templateSelect) state.template = templateById(templateSelect.value).id;
+  if (paletteSelect) state.palette = paletteById(paletteSelect.value).id;
+  if (titleInput) state.title = titleInput.value;
+  syncCaptions();
+  draw();
+  startDemo();
+  if (document.fonts && document.fonts.ready) {
+    document.fonts.ready.then(() => draw()).catch(() => {});
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', init, { once: true });
+} else {
+  init();
+}
