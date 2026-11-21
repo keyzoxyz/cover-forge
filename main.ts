@@ -1,66 +1,95 @@
-// Entrypoint for this make.fun entry: stage app/ and screenshots/ into the output directory and
-// write the dossier the scorer expects there.
-import { copyFileSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+// The entrypoint of this make.fun entry: copies the app and its screenshots into the output
+// directory and writes the dossier beside them with the vendored buildDossier, then reports
+// the file and byte counts of everything it wrote.
+//
+//   node main.ts                      # out = /output
+//   MAKEFUN_OUTPUT_DIR=out node main.ts
+//
+// Paths are resolved against this file's own directory, so the entry runs from any cwd.
+
+import { cpSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildDossier } from './vendor/makefun-app.ts';
+import { DossierError, buildDossier, type DossierCaps } from './vendor/makefun-app.ts';
 
-const here = dirname(fileURLToPath(import.meta.url));
+/** This entry's directory: app/, screenshots/ and vendor/ sit beside this file. */
+const root = dirname(fileURLToPath(import.meta.url));
+
+/** Where the entry is written: MAKEFUN_OUTPUT_DIR, else /output. */
 const out = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
 
-interface Counts {
+/**
+ * The caps the scorer's gate.json holds (gta6-cover-art-01): only text_max_bytes shapes the
+ * dossier's bytes, the rest only refuse what the gate refuses anyway. app_path_max_bytes is
+ * the library's own default of 1000 bytes.
+ */
+const CAPS: DossierCaps = {
+  text_max_bytes: 163840,
+  screenshots: { max: 4, max_bytes: 262144 },
+  app_max_files: 993,
+  app_max_bytes: 50331648,
+  app_path_max_bytes: 1000,
+};
+
+/** How many files a tree holds and how many bytes their contents come to. */
+interface Count {
   files: number;
   bytes: number;
 }
 
-function countImages(dir: string): Counts {
+/** Every file under `dir`, counted (directories cost no bytes). */
+function measure(dir: string): Count {
   let files = 0;
   let bytes = 0;
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      const inner = countImages(path);
-      files += inner.files;
-      bytes += inner.bytes;
-    } else if (entry.isFile()) {
-      files += 1;
-      bytes += statSync(path).size;
+  const stack: string[] = [''];
+  while (stack.length > 0) {
+    const rel = stack.pop()!;
+    for (const entry of readdirSync(rel === '' ? dir : join(dir, rel), { withFileTypes: true })) {
+      const path = rel === '' ? entry.name : `${rel}/${entry.name}`;
+      if (entry.isDirectory()) {
+        stack.push(path);
+      } else if (entry.isFile()) {
+        files++;
+        bytes += statSync(join(dir, path)).size;
+      }
     }
   }
   return { files, bytes };
 }
 
-function copyDir(from: string, to: string): void {
-  mkdirSync(to, { recursive: true });
-  for (const entry of readdirSync(from, { withFileTypes: true })) {
-    const src = join(from, entry.name);
-    const dst = join(to, entry.name);
-    if (entry.isDirectory()) {
-      copyDir(src, dst);
-    } else if (entry.isFile()) {
-      copyFileSync(src, dst);
-    }
-  }
+/** Copies `from` to `to`, replacing whatever `to` held, and returns the copy's count. */
+function copy(from: string, to: string): Count {
+  rmSync(to, { recursive: true, force: true });
+  cpSync(from, to, { recursive: true });
+  return measure(to);
 }
 
-mkdirSync(out, { recursive: true });
+const line = (label: string, count: Count): string =>
+  `${label}: ${count.files} file${count.files === 1 ? '' : 's'}, ${count.bytes} bytes`;
 
-const appOut = join(out, 'app');
-copyDir(join(here, 'app'), appOut);
-const app = countImages(appOut);
+try {
+  mkdirSync(out, { recursive: true });
+  const app = copy(join(root, 'app'), join(out, 'app'));
+  const screenshots = copy(join(root, 'screenshots'), join(out, 'screenshots'));
 
-const shotsOut = join(out, 'screenshots');
-copyDir(join(here, 'screenshots'), shotsOut);
-const shots = countImages(shotsOut);
+  // The dossier is built from the copied tree, exactly as the scorer builds it from what we hand in.
+  const dossier = buildDossier(out, CAPS);
+  writeFileSync(join(out, 'dossier.json'), dossier);
+  const dossierCount: Count = { files: 1, bytes: dossier.length };
 
-const dossier = buildDossier(out, {
-  text_max_bytes: 163840,
-  screenshots: { max: 4, max_bytes: 262144 },
-  app_max_files: 993,
-  app_max_bytes: 50331648,
-});
-writeFileSync(join(out, 'dossier.json'), dossier);
-
-console.log(`app: ${app.files} files, ${app.bytes} bytes`);
-console.log(`screenshots: ${shots.files} files, ${shots.bytes} bytes`);
-console.log(`dossier.json: ${dossier.byteLength} bytes`);
+  console.log(line('app/', app));
+  console.log(line('screenshots/', screenshots));
+  console.log(line('dossier.json', dossierCount));
+  console.log(line('total', {
+    files: app.files + screenshots.files + dossierCount.files,
+    bytes: app.bytes + screenshots.bytes + dossierCount.bytes,
+  }));
+  console.log(`wrote ${join(out, 'dossier.json')}`);
+} catch (err) {
+  if (err instanceof DossierError) {
+    console.error(`main: ${err.message}${err.limit === null ? '' : ` (limit: ${err.limit})`}`);
+    process.exitCode = 1;
+  } else {
+    throw err;
+  }
+}

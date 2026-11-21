@@ -1,192 +1,291 @@
-/** Sample photos for the cover-art maker: a night boulevard and a sunset
- * pier, painted with canvas 2D and returned as data-URL image records. */
-const TAU = Math.PI * 2;
-const SIZE = { width: 1200, height: 800 };
+// shots.js — procedurally painted sample photos for the cover art maker.
+// Canvas2D only: no network, no image files, so the demo poster works from file://.
 
-function seeded(seed) {
+function rng(seed) {
   let a = seed >>> 0;
   return () => {
-    a = (a + 0x6d2b79f5) | 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), a | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
 
-function surfaceFor(canvas, width, height) {
-  const surface = canvas && canvas.getContext ? canvas : document.createElement('canvas');
-  surface.width = width; surface.height = height;
-  return { surface, ctx: surface.getContext('2d') };
+const line = (ctx, x1, y1, x2, y2) => { ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke(); };
+
+function glow(ctx, x, y, r, inner) {
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0, inner);
+  g.addColorStop(1, 'rgba(0,0,0,0)');
+  ctx.fillStyle = g;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-const fill = (ctx, x, y, w, h, s) => { ctx.fillStyle = s; ctx.fillRect(x, y, w, h); };
-const dot = (ctx, x, y, r, s) => { ctx.fillStyle = s; ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); };
-const polygon = (ctx, pts, s) => { ctx.beginPath(); pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y))); ctx.closePath(); ctx.fillStyle = s; ctx.fill(); };
-const lin = (ctx, x0, y0, x1, y1, stops) => { const g = ctx.createLinearGradient(x0, y0, x1, y1); stops.forEach(([o, c]) => g.addColorStop(o, c)); return g; };
-const radial = (ctx, x, y, r, inner, outer) => { const g = ctx.createRadialGradient(x, y, 0, x, y, r); g.addColorStop(0, inner); g.addColorStop(1, outer); return g; };
-const glow = (ctx, x, y, r, inner, outer) => { ctx.fillStyle = radial(ctx, x, y, r, inner, outer); ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); ctx.fill(); };
-
 function paintNightCity(ctx, w, h) {
-  const rand = seeded(0x51ce77), u = h / 800, horizon = h * 0.64;
-  const vx = w * 0.52, halfTop = 10 * u, lb = w * 0.24, rb = w * 0.8;
-  fill(ctx, 0, 0, w, horizon, lin(ctx, 0, 0, 0, horizon, [[0, '#03040c'], [0.55, '#0c1230'], [1, '#42224d']]));
-  fill(ctx, 0, h * 0.14, w, horizon - h * 0.14, radial(ctx, vx, horizon, w * 0.6, 'rgba(255,124,86,0.26)', 'rgba(255,124,86,0)'));
-  for (let i = 0; i < 150; i++) {
-    ctx.globalAlpha = 0.25 + rand() * 0.7;
-    dot(ctx, rand() * w, rand() * horizon * 0.72, (0.5 + rand() * 1.1) * u, rand() > 0.82 ? '#ffd9b0' : '#dfe9ff');
+  const rand = rng(0x5eed);
+  const hz = h * 0.62; // horizon / far end of the boulevard
+
+  const sky = ctx.createLinearGradient(0, 0, 0, hz);
+  sky.addColorStop(0, '#070b1c');
+  sky.addColorStop(0.55, '#141636');
+  sky.addColorStop(1, '#3a2a4d');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, hz);
+
+  glow(ctx, w * 0.78, h * 0.16, w * 0.15, 'rgba(255,246,214,0.8)');
+  ctx.fillStyle = '#fff8dc';
+  ctx.beginPath();
+  ctx.arc(w * 0.78, h * 0.16, w * 0.026, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Two depth layers of towers; only the near layer gets lit windows.
+  for (let layer = 0; layer < 2; layer++) {
+    const far = !layer;
+    let x = -w * 0.04;
+    while (x < w) {
+      const bw = w * (0.05 + rand() * 0.09);
+      const bh = h * (far ? 0.06 + rand() * 0.18 : 0.12 + rand() * 0.3);
+      const top = hz - layer * h * 0.02 - bh;
+      ctx.fillStyle = far ? '#151734' : '#080a18';
+      ctx.fillRect(x, top, bw, bh);
+      if (!far) {
+        const cols = Math.max(2, Math.round(bw / 16));
+        const rows = Math.max(3, Math.round(bh / 20));
+        for (let i = 0; i < cols; i++) {
+          for (let j = 0; j < rows; j++) {
+            if (rand() > 0.45) continue;
+            ctx.fillStyle = `rgba(255,${200 + rand() * 40},${110 + rand() * 60},${0.4 + rand() * 0.55})`;
+            ctx.fillRect(x + (i + 0.25) * (bw / cols), top + (j + 0.25) * (bh / rows), (bw / cols) * 0.5, (bh / rows) * 0.45);
+          }
+        }
+      }
+      x += bw + w * (0.005 + rand() * 0.012);
+    }
+  }
+
+  // Asphalt converging to the horizon.
+  const road = ctx.createLinearGradient(0, hz, 0, h);
+  road.addColorStop(0, '#1b1a26');
+  road.addColorStop(1, '#05050b');
+  ctx.fillStyle = road;
+  ctx.beginPath();
+  ctx.moveTo(w * 0.28, hz);
+  ctx.lineTo(w * 0.72, hz);
+  ctx.lineTo(w * 1.12, h);
+  ctx.lineTo(-w * 0.12, h);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+  ctx.lineWidth = Math.max(1, w * 0.002);
+  for (let i = 1; i < 5; i++) {
+    const t = i / 4;
+    const y = hz + (h - hz) * t * t;
+    line(ctx, w * (0.28 + 0.12 * t), y, w * (0.72 - 0.12 * t), y);
+  }
+
+  // Lane dashes widen toward the viewer to sell the perspective.
+  for (let i = 0; i < 7; i++) {
+    const t = i / 7;
+    const dw = w * (0.004 + t * 0.012);
+    ctx.fillStyle = 'rgba(255,236,170,0.5)';
+    ctx.fillRect(w * 0.5 - dw / 2, hz + (h - hz) * t * t, dw, h * (0.008 + t * 0.03));
+  }
+
+  // Street lamps alternating down both kerbs, each with a warm pool of light.
+  for (let i = 0; i < 6; i++) {
+    const t = (i + 0.5) / 6;
+    const y = hz + (h - hz) * t * t;
+    const x = w * 0.5 + (i % 2 ? 1 : -1) * w * (0.2 + 0.36 * t);
+    const ph = h * (0.1 + 0.3 * t);
+    ctx.strokeStyle = 'rgba(12,12,20,0.95)';
+    ctx.lineWidth = Math.max(1, w * (0.002 + 0.005 * t));
+    line(ctx, x, y, x, y - ph);
+    glow(ctx, x, y - ph, w * (0.03 + 0.07 * t), 'rgba(255,196,110,0.6)');
+    ctx.fillStyle = '#ffd79a';
+    ctx.beginPath();
+    ctx.arc(x, y - ph, w * (0.004 + 0.008 * t), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Tail lights heading away, headlights approaching.
+  for (let i = 0; i < 10; i++) {
+    const t = rand();
+    const away = rand() > 0.5;
+    const x = w * (0.5 + (rand() - 0.5) * 0.2 * (0.3 + t)) + (away ? -1 : 1) * w * 0.06 * t;
+    glow(ctx, x, hz + (h - hz) * t * t, w * (0.006 + 0.03 * t), away ? 'rgba(255,70,60,0.5)' : 'rgba(255,248,220,0.55)');
+  }
+
+  // Sky glow bleeding onto the wet asphalt.
+  ctx.globalAlpha = 0.1;
+  for (let i = 0; i < 5; i++) {
+    ctx.fillStyle = i % 2 ? '#3a2a4d' : '#141636';
+    ctx.fillRect(0, hz + i * h * 0.015, w, h * 0.02);
   }
   ctx.globalAlpha = 1;
-  const mx = w * 0.79, my = h * 0.15, mr = 22 * u;
-  glow(ctx, mx, my, mr * 6, 'rgba(214,230,255,0.35)', 'rgba(214,230,255,0)');
-  dot(ctx, mx, my, mr, '#f2f5ff'); dot(ctx, mx - mr * 0.3, my - mr * 0.2, mr * 0.22, 'rgba(180,195,225,0.35)');
-  dot(ctx, mx + mr * 0.35, my + mr * 0.3, mr * 0.16, 'rgba(180,195,225,0.35)');
-  for (let x = -30 * u; x < w + 30 * u; x += (60 + rand() * 140) * u + 4 * u) {
-    const bh = (46 + rand() * 120) * u;
-    fill(ctx, x, horizon - bh, (60 + rand() * 140) * u, bh, '#070a18');
-  }
-  const lit = ['#ffd9a0', '#ffc76f', '#ffb45e', '#f7e6c2', '#9fd6ff'];
-  for (let x = -50 * u; x < w + 50 * u; ) {
-    const bw = (64 + rand() * 110) * u, bh = (110 + rand() * 220) * u, top = horizon - bh, tone = (7 + rand() * 9) | 0;
-    fill(ctx, x, top, bw, bh, `rgb(${tone},${tone + 2},${tone + 10})`);
-    fill(ctx, x, top, bw, 2 * u, 'rgba(255,168,120,0.12)');
-    if (rand() > 0.55) {
-      const ax = x + bw * (0.3 + rand() * 0.4);
-      fill(ctx, ax, top - 18 * u, 2 * u, 18 * u, '#0a0d1c'); dot(ctx, ax, top - 18 * u, 2 * u, '#ff4d4d');
-    }
-    const cols = Math.max(2, (bw / (17 * u)) | 0), rows = Math.max(3, (bh / (26 * u)) | 0);
-    for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-      if (rand() < 0.42) continue;
-      ctx.globalAlpha = 0.45 + rand() * 0.55;
-      fill(ctx, x + (8 + c * 17) * u, top + (12 + r * 26) * u, 8 * u, 12 * u, lit[(rand() * lit.length) | 0]);
-    }
-    ctx.globalAlpha = 1; x += bw + 6 * u;
-  }
-  const asphalt = lin(ctx, 0, horizon, 0, h, [[0, '#131627'], [1, '#05060d']]);
-  polygon(ctx, [[vx - halfTop, horizon], [vx + halfTop, horizon], [rb, h], [lb, h]], asphalt);
-  polygon(ctx, [[lb - 60 * u, h], [vx - halfTop * 1.6, horizon], [vx - halfTop, horizon], [lb, h]], '#0b0d18');
-  polygon(ctx, [[rb, h], [vx + halfTop, horizon], [vx + halfTop * 1.6, horizon], [rb + 60 * u, h]], '#0b0d18');
-  const laneY = (t) => horizon + (h - horizon) * Math.pow(t, 1.7);
-  for (let t = 0.03; t < 1; t += 0.075) {
-    const y0 = laneY(t), y1 = laneY(t + 0.042), spread = (y0 - horizon) / (h - horizon);
-    fill(ctx, vx - (0.6 + 2.2 * spread) * u, y0, (1.2 + 4.4 * spread) * u, y1 - y0, 'rgba(255,214,150,0.75)');
-  }
-  for (const side of [-1, 1]) for (let t = 0.14; t < 1; t += 0.17) {
-    const f = Math.pow(t, 1.6), topX = vx + side * halfTop * 2.2, botX = side < 0 ? lb - 6 * u : rb + 6 * u;
-    const px = topX + (botX - topX) * f, py = horizon + (h - horizon) * f;
-    const ph = (24 + 120 * Math.pow(t, 1.4)) * u, lr = 26 * u * t + 6 * u;
-    fill(ctx, px - 1.5 * u, py - ph, 3 * u, ph, '#07080f');
-    glow(ctx, px, py - ph, lr, 'rgba(255,206,138,0.55)', 'rgba(255,150,70,0)');
-    dot(ctx, px, py - ph, 2.4 * u, '#ffe2ae');
-    fill(ctx, px - 2 * u, py, 4 * u, ph * 0.9, 'rgba(255,170,90,0.05)');
-  }
-  ctx.globalCompositeOperation = 'lighter';
-  for (let i = 0; i < 14; i++) {
-    const y = h * (0.8 + rand() * 0.17), x = w * (0.27 + rand() * 0.46);
-    ctx.fillStyle = rand() > 0.4 ? 'rgba(255,238,200,0.55)' : 'rgba(255,74,58,0.5)';
-    ctx.beginPath(); ctx.ellipse(x, y, (30 + rand() * 110) * u * (y / h), (2.5 + rand() * 4) * u, 0, 0, TAU); ctx.fill();
-  }
-  ctx.globalCompositeOperation = 'source-over';
 }
 
 function paintPierSunset(ctx, w, h) {
-  const rand = seeded(0x9e11a), u = h / 800, horizon = h * 0.57;
-  fill(ctx, 0, 0, w, horizon, lin(ctx, 0, 0, 0, horizon, [[0, '#140e2e'], [0.32, '#4a1f52'], [0.58, '#9c3a58'], [0.78, '#e4674a'], [1, '#ffd693']]));
-  const sx = w * 0.64, sy = horizon - 6 * u, sr = 62 * u;
-  glow(ctx, sx, sy, sr * 4.2, 'rgba(255,226,150,0.75)', 'rgba(255,120,60,0)');
-  const sun = lin(ctx, 0, sy - sr, 0, sy + sr, [[0, '#fffbe0'], [0.55, '#ffd27a'], [1, '#ff9147']]);
-  ctx.fillStyle = sun; ctx.beginPath(); ctx.arc(sx, sy, sr, 0, TAU); ctx.fill();
-  for (let i = 0; i < 9; i++) {
-    const cx = rand() * w, cy = h * 0.1 + rand() * h * 0.36;
-    const cw = (120 + rand() * 260) * u, ch = (7 + rand() * 16) * u, a = 0.16 + rand() * 0.3;
-    ctx.fillStyle = `rgba(46,18,52,${a})`; ctx.beginPath(); ctx.ellipse(cx, cy, cw, ch, 0, 0, TAU); ctx.fill();
-    ctx.fillStyle = `rgba(255,150,90,${a * 0.8})`; ctx.beginPath();
-    ctx.ellipse(cx, cy + ch * 0.9, cw * 0.75, ch * 0.32, 0, 0, TAU); ctx.fill();
+  const rand = rng(0xc0ffee);
+  const hz = h * 0.58;
+  const sx = w * 0.62;
+  const sy = hz - h * 0.05;
+
+  const sky = ctx.createLinearGradient(0, 0, 0, hz);
+  sky.addColorStop(0, '#241a4a');
+  sky.addColorStop(0.42, '#8c3a5c');
+  sky.addColorStop(0.75, '#e2683f');
+  sky.addColorStop(1, '#f9b35c');
+  ctx.fillStyle = sky;
+  ctx.fillRect(0, 0, w, hz);
+
+  glow(ctx, sx, sy, w * 0.32, 'rgba(255,214,140,0.5)');
+  ctx.fillStyle = '#ffe3a3';
+  ctx.beginPath();
+  ctx.arc(sx, sy, w * 0.042, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Backlit cloud streaks.
+  for (let i = 0; i < 6; i++) {
+    const y = hz * (0.18 + rand() * 0.62);
+    const ch = h * (0.014 + rand() * 0.02);
+    const g = ctx.createLinearGradient(0, y, 0, y + ch);
+    g.addColorStop(0, 'rgba(255,190,150,0)');
+    g.addColorStop(0.5, `rgba(255,170,150,${0.07 + rand() * 0.12})`);
+    g.addColorStop(1, 'rgba(255,190,150,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, y, w, ch);
   }
-  fill(ctx, 0, horizon, w, h - horizon, lin(ctx, 0, horizon, 0, h, [[0, '#d9835a'], [0.18, '#7a3a52'], [0.55, '#331b3c'], [1, '#100b22']]));
-  for (let y = horizon + 3 * u; y < h; y += 5 * u) {
-    const d = (y - horizon) / (h - horizon), spread = w * (0.02 + d * 0.16);
-    for (let i = 0, n = 2 + ((rand() * 4) | 0); i < n; i++) {
-      const len = (6 + rand() * 40) * u * (0.4 + d);
-      ctx.globalAlpha = (0.15 + rand() * 0.5) * (1 - d * 0.45);
-      fill(ctx, sx + (rand() * 2 - 1) * spread - len / 2, y, len, (1 + rand() * 1.6) * u, rand() > 0.3 ? '#ffd08a' : '#ffab63');
+
+  const sea = ctx.createLinearGradient(0, hz, 0, h);
+  sea.addColorStop(0, '#c96a48');
+  sea.addColorStop(0.25, '#7d3f53');
+  sea.addColorStop(1, '#1c1630');
+  ctx.fillStyle = sea;
+  ctx.fillRect(0, hz, w, h - hz);
+
+  // Sun glitter: a widening column of broken strokes.
+  for (let i = 0; i < 80; i++) {
+    const t = rand();
+    const len = w * (0.006 + 0.05 * t) * (0.4 + rand());
+    ctx.fillStyle = `rgba(255,${190 + rand() * 50},${130 + rand() * 60},${(1 - t) * 0.45 * rand() + 0.05})`;
+    ctx.fillRect(sx + (rand() - 0.5) * w * (0.03 + 0.26 * t) - len / 2, hz + (h - hz) * t * t, len, Math.max(1, h * 0.002 * (0.5 + 2 * t)));
+  }
+
+  // Pier deck sweeping in from the lower left.
+  const deckY = hz + h * 0.045;
+  const dg = ctx.createLinearGradient(0, deckY, 0, h);
+  dg.addColorStop(0, '#3a2418');
+  dg.addColorStop(1, '#120b0a');
+  ctx.fillStyle = dg;
+  ctx.beginPath();
+  ctx.moveTo(-w * 0.05, h * 1.05);
+  ctx.lineTo(w * 0.16, deckY);
+  ctx.lineTo(w * 0.66, deckY);
+  ctx.lineTo(w * 0.92, h * 1.05);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(255,200,150,0.1)';
+  ctx.lineWidth = Math.max(1, w * 0.0015);
+  for (let i = 1; i < 14; i++) {
+    const t = Math.pow(i / 14, 1.8);
+    const y = deckY + (h * 1.05 - deckY) * t;
+    line(ctx, -w * 0.05 + w * 0.21 * t, y, w * 0.92 - w * 0.26 * t, y);
+  }
+
+  // Posts, each trailed by a wavy reflection in the water.
+  for (const px of [0.2, 0.32, 0.44, 0.56, 0.68]) {
+    const t = (px - 0.16) / 0.5;
+    const x = w * px;
+    const top = deckY - h * (0.02 + 0.1 * (1 - t));
+    const base = deckY + h * 0.02 + h * 0.06 * t;
+    ctx.fillStyle = '#150d0b';
+    ctx.fillRect(x - w * 0.006, top, w * 0.012, base - top);
+    for (let k = 0; k < 6; k++) {
+      ctx.fillStyle = `rgba(20,10,14,${0.4 - k * 0.05})`;
+      ctx.fillRect(x - w * 0.006 + Math.sin(k * 1.7 + px * 9) * w * 0.006, base + h * 0.02 * k, w * 0.012, h * 0.02);
     }
   }
-  ctx.globalAlpha = 1;
-  for (let i = 0; i < 26; i++) {
-    ctx.globalAlpha = 0.08 + rand() * 0.18;
-    fill(ctx, rand() * w, horizon + (h - horizon) * rand(), (20 + rand() * 90) * u, 1.4 * u, '#ffd9a8');
-  }
-  ctx.globalAlpha = 1;
-  const lN = [-0.06 * w, h * 1.02], lF = [0.1 * w, horizon + 4 * u];
-  const rN = [0.66 * w, h * 1.02], rF = [0.21 * w, horizon + 6 * u];
-  const lerp = (a, b, t) => a + (b - a) * t;
-  const leftAt = (t) => [lerp(lN[0], lF[0], t), lerp(lN[1], lF[1], t)];
-  const rightAt = (t) => [lerp(rN[0], rF[0], t), lerp(rN[1], rF[1], t)];
-  polygon(ctx, [lN, lF, rF, rN], '#0d0916');
-  for (let t = 0.08; t < 1; t += 0.085) {
-    const [lx, ly] = leftAt(t), [rx, ry] = rightAt(t);
-    ctx.strokeStyle = 'rgba(255,178,120,0.13)'; ctx.lineWidth = 1.2 * u;
-    ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(rx, ry); ctx.stroke();
-  }
-  for (let t = 0.1; t < 1; t += 0.16) {
-    const ph = (10 + 110 * Math.pow(t, 1.5)) * u;
-    for (const [px, py] of [leftAt(t), rightAt(t)]) {
-      fill(ctx, px - 3 * u, py - ph, 6 * u, ph, '#08060f');
-      fill(ctx, px - 3 * u, py, 6 * u, ph * 1.8, 'rgba(8,6,15,0.45)');
-    }
-    const [lx, ly] = leftAt(t), [rx, ry] = rightAt(t);
-    ctx.strokeStyle = 'rgba(10,7,17,0.9)'; ctx.lineWidth = 3 * u;
-    ctx.beginPath(); ctx.moveTo(lx, ly - ph); ctx.lineTo(rx, ry - ph); ctx.stroke();
-  }
-  for (const t of [0.32, 0.62]) {
-    const [px, py] = rightAt(t);
-    const ph = (10 + 110 * Math.pow(t, 1.5)) * u + 34 * u;
-    fill(ctx, px - 1.6 * u, py - ph, 3.2 * u, ph, '#08060f');
-    glow(ctx, px, py - ph, 20 * u, 'rgba(255,220,150,0.7)', 'rgba(255,150,70,0)');
-    dot(ctx, px, py - ph, 2.2 * u, '#fff0c8');
-  }
-  for (const [bx, by, bs] of [[0.3, 0.2, 1], [0.36, 0.16, 0.8], [0.73, 0.26, 0.9]]) {
-    ctx.strokeStyle = 'rgba(30,12,36,0.8)'; ctx.lineWidth = 1.5 * u;
-    ctx.beginPath(); ctx.moveTo(bx * w - 8 * u * bs, by * h);
-    ctx.quadraticCurveTo(bx * w, by * h - 6 * u * bs, bx * w + 8 * u * bs, by * h);
-    ctx.stroke();
-  }
+
+  ctx.strokeStyle = 'rgba(18,10,10,0.85)';
+  ctx.lineWidth = Math.max(1, w * 0.004);
+  line(ctx, w * 0.16, deckY - h * 0.12, w * 0.66, deckY - h * 0.09);
+  line(ctx, w * 0.16, deckY - h * 0.07, w * 0.66, deckY - h * 0.055);
+
+  // A lone figure at the rail, for scale and story.
+  const fx = w * 0.47;
+  const fy = deckY - h * 0.035;
+  const fh = h * 0.075;
+  ctx.fillStyle = '#0d0709';
+  ctx.fillRect(fx - w * 0.008, fy - fh, w * 0.016, fh);
+  ctx.beginPath();
+  ctx.arc(fx, fy - fh - w * 0.012, w * 0.011, 0, Math.PI * 2);
+  ctx.fill();
 }
 
-async function asImage(src) {
-  if (typeof Image !== 'function') return null;
+const SAMPLES = [
+  { id: 'night-boulevard', title: 'Night Boulevard', paint: paintNightCity },
+  { id: 'pier-sunset', title: 'Pier at Sunset', paint: paintPierSunset },
+];
+
+function prepare(canvas) {
+  if (!canvas || typeof canvas.toDataURL !== 'function') {
+    throw new TypeError('buildSamples needs a canvas element with toDataURL()');
+  }
+  if (!canvas.width) canvas.width = 1024;
+  if (!canvas.height) canvas.height = 1024;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not acquire a 2d context for the sample photos');
+  return ctx;
+}
+
+async function toImage(canvas, sample) {
+  const src = canvas.toDataURL('image/jpeg', 0.92);
+  if (typeof Image === 'undefined') return { src, width: canvas.width, height: canvas.height, alt: sample.title };
   const img = new Image();
+  img.alt = sample.title;
   img.src = src;
   if (typeof img.decode === 'function') {
-    try { await img.decode(); } catch { /* element is still usable */ }
+    try {
+      await img.decode(); // resolves before first paint; tolerates failure below
+    } catch {
+      // Some engines reject decode() on big data URLs even though src is usable.
+    }
   }
   return img;
 }
 
+/**
+ * Paint the demo photos and hand back image-like objects.
+ *
+ * @param {HTMLCanvasElement} canvas scratch canvas, reused for both scenes
+ * @param {(img: HTMLImageElement, sample: {id: string, title: string}) => any} [drawCover]
+ *        optional hook fired as each photo becomes ready, so the caller can
+ *        compose the demo poster with no external files.
+ * @returns {Promise<HTMLImageElement[]>}
+ */
 export async function buildSamples(canvas, drawCover) {
-  const scenes = [
-    { id: 'night-city', label: 'Night boulevard', paint: paintNightCity,
-      alt: 'A night city boulevard lined with lit windows and amber streetlights' },
-    { id: 'pier-sunset', label: 'Pier at sunset', paint: paintPierSunset,
-      alt: 'A wooden pier silhouetted against an orange sunset over a glittering sea' },
-  ];
-  const { surface, ctx } = surfaceFor(canvas, SIZE.width, SIZE.height);
-  const samples = [];
-  for (const scene of scenes) {
-    surface.width = SIZE.width; surface.height = SIZE.height;
-    ctx.save(); scene.paint(ctx, SIZE.width, SIZE.height);
-    if (typeof drawCover === 'function') {
-      const meta = { id: scene.id, width: SIZE.width, height: SIZE.height, sample: true };
-      try {
-        if (drawCover.length >= 3) drawCover(ctx, SIZE.width, SIZE.height);
-        else drawCover(ctx, meta);
-      } catch { /* optional hook must not break the samples */ }
-    }
+  const ctx = prepare(canvas);
+  const out = [];
+
+  for (const sample of SAMPLES) {
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    sample.paint(ctx, canvas.width, canvas.height);
     ctx.restore();
-    const src = surface.toDataURL('image/png');
-    samples.push({ id: scene.id, label: scene.label, alt: scene.alt,
-      width: SIZE.width, height: SIZE.height, aspect: SIZE.width / SIZE.height,
-      src, url: src, image: await asImage(src) });
+
+    const img = await toImage(canvas, sample);
+    out.push(img);
+    if (typeof drawCover === 'function') await drawCover(img, { id: sample.id, title: sample.title });
   }
-  return samples;
+
+  return out;
 }
+
+export default buildSamples;

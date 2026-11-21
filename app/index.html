@@ -3,94 +3,70 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Cover Forge — Poster Cover Art Maker</title>
+  <title>Cover Forge — GTA 6 Style Cover Art Maker</title>
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
   <header class="masthead">
     <h1 class="masthead__name">Cover Forge</h1>
-    <p class="masthead__pitch">Forge sun-soaked, neon-drenched cover art from your own photos in seconds.</p>
+    <p class="masthead__pitch">Forge sun-drenched, neon-soaked cover art from your own photos in seconds.</p>
   </header>
 
-  <main class="workspace">
+  <main class="layout">
     <section class="controls" aria-label="Cover controls">
-      <div class="panel">
-        <h2 class="panel__title">Photos</h2>
-        <label class="dropzone" for="photos">
-          <span class="dropzone__icon" aria-hidden="true">+</span>
-          <span class="dropzone__label">Drop 2–4 photos here</span>
-          <span class="dropzone__hint">or click to browse</span>
-          <input
-            class="dropzone__input"
-            type="file"
-            id="photos"
-            name="photos"
-            accept="image/*"
-            multiple
-          >
+      <div class="drop-zone" id="drop-zone">
+        <label class="drop-zone__label" for="photos">
+          <span class="drop-zone__title">Drop 2–4 photos here</span>
+          <span class="drop-zone__hint">or click to browse</span>
         </label>
-        <p class="field-note">Two to four images. The first fills the frame.</p>
+        <input
+          type="file"
+          id="photos"
+          name="photos"
+          accept="image/*"
+          multiple
+        >
       </div>
 
-      <div class="panel">
-        <h2 class="panel__title">Captions</h2>
-        <div class="field-grid">
-          <label class="field">
-            <span class="field__label">Caption 1</span>
-            <input type="text" id="caption-1" name="caption-1" maxlength="60" placeholder="Ride or die">
-          </label>
-          <label class="field">
-            <span class="field__label">Caption 2</span>
-            <input type="text" id="caption-2" name="caption-2" maxlength="60" placeholder="No rules tonight">
-          </label>
-          <label class="field">
-            <span class="field__label">Caption 3</span>
-            <input type="text" id="caption-3" name="caption-3" maxlength="60" placeholder="Sunset state of mind">
-          </label>
-          <label class="field">
-            <span class="field__label">Caption 4</span>
-            <input type="text" id="caption-4" name="caption-4" maxlength="60" placeholder="Outrun the law">
-          </label>
-        </div>
+      <fieldset class="field-group">
+        <legend>Captions</legend>
+        <input type="text" id="caption-1" name="caption-1" placeholder="Caption 1" autocomplete="off">
+        <input type="text" id="caption-2" name="caption-2" placeholder="Caption 2" autocomplete="off">
+        <input type="text" id="caption-3" name="caption-3" placeholder="Caption 3" autocomplete="off">
+        <input type="text" id="caption-4" name="caption-4" placeholder="Caption 4" autocomplete="off">
+      </fieldset>
+
+      <div class="field-group">
+        <label for="title">Title</label>
+        <input type="text" id="title" name="title" placeholder="Enter a title" autocomplete="off">
       </div>
 
-      <div class="panel">
-        <h2 class="panel__title">Poster</h2>
-        <label class="field">
-          <span class="field__label">Title</span>
-          <input type="text" id="title" name="title" maxlength="40" placeholder="Vice City Nights" autocomplete="off">
-        </label>
-
-        <label class="field">
-          <span class="field__label">Template</span>
-          <select id="template" name="template">
-            <option value="vice-dusk" selected>Vice Dusk</option>
-            <option value="neon-rain">Neon Rain</option>
-            <option value="sunset-heist">Sunset Heist</option>
-          </select>
-        </label>
-
-        <label class="field">
-          <span class="field__label">Palette</span>
-          <select id="palette" name="palette">
-            <option value="miami" selected>Miami Heat</option>
-            <option value="midnight">Midnight Chrome</option>
-            <option value="citrus">Citrus Blaze</option>
-            <option value="vapor">Vapor Bloom</option>
-          </select>
-        </label>
-
-        <button type="button" id="export" class="button button--primary">Export PNG</button>
+      <div class="field-group">
+        <label for="template">Template</label>
+        <select id="template" name="template">
+          <option value="vice-dusk" selected>Vice Dusk</option>
+          <option value="neon-rain">Neon Rain</option>
+          <option value="sunset-heist">Sunset Heist</option>
+        </select>
       </div>
 
-      <p id="status" class="status" role="status" aria-live="polite">Add 2–4 photos to begin.</p>
+      <div class="field-group">
+        <label for="palette">Palette</label>
+        <select id="palette" name="palette">
+          <option value="miami" selected>Miami</option>
+          <option value="vapor">Vapor</option>
+          <option value="toxic">Toxic</option>
+          <option value="midnight">Midnight</option>
+        </select>
+      </div>
+
+      <button type="button" id="export" class="export-button">Export PNG</button>
     </section>
 
-    <section class="preview" aria-label="Poster preview">
-      <div class="preview__frame">
-        <canvas id="poster" width="1024" height="1024">Your browser does not support the canvas element.</canvas>
-      </div>
-      <img id="hidden-cover" alt="" hidden>
+    <section class="preview" aria-label="Cover preview">
+      <canvas id="poster" width="1024" height="1024"></canvas>
+      <p class="status" id="status" role="status" aria-live="polite">Add 2 to 4 photos to begin.</p>
+      <img id="hidden-cover" alt="Exported cover" hidden>
     </section>
   </main>
 
