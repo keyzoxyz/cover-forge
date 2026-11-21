@@ -136,19 +136,7 @@ async function loadPhotos(files) {
 
 /* --------------------------------------------------------------- demo boot */
 
-async function startDemo() {
-  try {
-    const samples = await buildSamples(canvas, drawCover);
-    if (state.photos.length) return; // the user already dropped their own
-    state.photos = samples.slice(0, MAX_PHOTOS);
-    state.demo = true;
-    syncCaptions();
-    draw();
-    setStatus('Demo poster ready — drop 2–4 photos to make it yours.');
-  } catch (err) {
-    draw(); // the engine still paints a poster from primitives alone
-  }
-}
+/* The demo is built inside init() so the first paint never depends on files. */
 
 /* ----------------------------------------------------------------- export */
 
@@ -293,15 +281,32 @@ window.__cover = { setTemplate, setPalette, setTitle, markEarnedCount };
 
 /* -------------------------------------------------------------------- boot */
 
-function init() {
+async function init() {
   if (templateSelect) state.template = templateById(templateSelect.value).id;
   if (paletteSelect) state.palette = paletteById(paletteSelect.value).id;
   if (titleInput) state.title = titleInput.value;
   syncCaptions();
-  draw();
-  startDemo();
+
+  /* Paint a finished poster straight away: buildSamples() synthesises the demo
+     photos in a throwaway canvas, so nothing has to be uploaded first. */
+  try {
+    const samples = await buildSamples(canvas, drawCover);
+    if (!state.photos.length) {
+      state.photos = samples.slice(0, MAX_PHOTOS);
+      state.demo = true;
+      syncCaptions();
+    }
+    draw();
+    setStatus('Demo poster ready — drop 2–4 photos to make it yours.');
+  } catch (err) {
+    console.error('Demo samples failed to build:', err);
+    draw(); // the engine still paints a poster from primitives alone
+  }
+
   if (document.fonts && document.fonts.ready) {
-    document.fonts.ready.then(() => draw()).catch(() => {});
+    document.fonts.ready
+      .then(() => draw())
+      .catch((err) => console.error('Fonts failed to load:', err));
   }
 }
 

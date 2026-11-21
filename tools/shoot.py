@@ -90,7 +90,9 @@ def wait_for_demo(page) -> None:
     """Wait until the canvas exists, fonts are ready and the demo art is drawn."""
     page.wait_for_selector("#poster", state="attached", timeout=30_000)
     page.wait_for_function(
-        "() => !!window.__cover && document.fonts && document.fonts.status === 'complete'",
+        # FontFaceSet.status is only ever 'loading' or 'loaded' — 'complete' is
+        # the document.readyState value, not a font status.
+        "() => !!window.__cover && document.fonts && document.fonts.status === 'loaded'",
         timeout=30_000,
     )
     try:
